@@ -1,7 +1,6 @@
 package pixlib.media {
 	//{ Imports
 	import flash.events.AsyncErrorEvent;
-	import flash.events.Event;
 	import flash.events.IOErrorEvent;
 	import flash.events.NetStatusEvent;
 	import flash.media.SoundTransform;
@@ -14,7 +13,6 @@ package pixlib.media {
 	import pixlib.logging.logger;
 	import pixlib.utils.Dispatcher;
 	import pixlib.utils.EnterFrame;
-
 	//}
 	
 	public final class VideoController extends Dispatcher {
@@ -77,8 +75,8 @@ package pixlib.media {
 			_stream.dispose();
 		}
 		
-		private function _requireOpenState():void {
-			if (_state != VideoState.OPEN)
+		private function _requireOpenOrBufferingState():void {
+			if (_state != VideoState.OPEN && _state != VideoState.BUFFERING)
 				throw new Error('Invalid State, no stream open');
 		}
 		///////////////////////////////////////////////////////////////////////
@@ -113,7 +111,7 @@ package pixlib.media {
 				case 'status':
 					switch (event.info.code) {
 						case 'NetStream.Play.Start':
-							_setState(VideoState.OPEN);
+							_setState(VideoState.BUFFERING);
 							_updateTime(0);
 							playing = autoPlay;
 							break;
@@ -125,16 +123,25 @@ package pixlib.media {
 								playing = false;
 							}
 							dispatch(COMPLETE, this);
+							logger.info('STOP', JSON.stringify(event.info), this);
+							break;
+						case 'NetStream.Buffer.Full':
+							_setState(VideoState.OPEN);
+							break;
+						case 'NetStream.Seek.Notify':
+							_setState(VideoState.BUFFERING);
+							break;
+						case 'NetStream.Buffer.Empty':
 							break;
 						// These are ignored
 						case 'NetStream.Seek.Complete':
-						case 'NetStream.Buffer.Full':
 						case 'NetStream.Unpause.Notify':
 						case 'NetStream.Pause.Notify':
 						case 'NetStream.Buffer.Flush':
-						case 'NetStream.Buffer.Empty':
 						case 'NetStream.SeekStart.Notify':
-						case 'NetStream.Seek.Notify':
+						case 'NetStream.Play.StreamNotFound':
+						case 'NetStream.Video.DimensionChange':
+							//logger.info('IGNORED', JSON.stringify(event.info), this);
 							break;
 						default:
 							logger.info('Unknown NetStream Status Code', JSON.stringify(event.info), this);
@@ -169,7 +176,7 @@ package pixlib.media {
 		///////////////////////////////////////////////////////////////////////
 		private var _reallyPlaying:Boolean = false;
 		
-		private function _onUpdateTimeEnterFrame(event:Event):void {
+		private function _onUpdateTimeEnterFrame(_):void {
 			var time:int = getTimer();
 			_updateTime(_stream.time);
 			dispatch(TIME_CHANGE, this);
@@ -204,7 +211,7 @@ package pixlib.media {
 		/** The position of the playhead, in seconds. */
 		public function get time():Number { return _time; }
 		public function set time(value:Number):void {
-			_requireOpenState();
+			_requireOpenOrBufferingState();
 			
 			if (value < 0) {
 				value = 0;
@@ -231,7 +238,7 @@ package pixlib.media {
 		/** Indicates if the playhead position is currently being moved. */
 		public function get seeking():Boolean { return _seeking; }
 		public function set seeking(value:Boolean):void {
-			_requireOpenState();
+			_requireOpenOrBufferingState();
 			if (value == _seeking) return;
 			
 			_seeking = value;
@@ -246,7 +253,7 @@ package pixlib.media {
 		/** Indicates if the video is currently playing. */
 		public function get playing():Boolean { return _playing; }
 		public function set playing(value:Boolean):void {
-			_requireOpenState();
+			_requireOpenOrBufferingState();
 			
 			_playing = value;
 			if (! _seeking) {
@@ -308,6 +315,11 @@ package pixlib.media {
 				_stream.play(value);
 			}
 		}
+		
+		/** The number of bytes loaded. */
+		public final function get bytesLoaded():uint { return _stream.bytesLoaded; }
+		/** The total number of bytes. */
+		public final function get bytesTotal():uint { return _stream.bytesTotal; }
 		///////////////////////////////////////////////////////////////////////
 		//}
 		
